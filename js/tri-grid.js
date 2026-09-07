@@ -3,7 +3,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/+esm';
 export class TriGrid {
   constructor() {
     this.lod = 0;
-    this.vertices = this.buildCanonicalVertices();
+    this.vertexMap = this.buildCanonicalVertices();
     this.faces = this.buildLOD0();
   }
 
@@ -34,7 +34,7 @@ export class TriGrid {
       index,
       address: String(index),
       vertexIds,
-      vertices: vertexIds.map(id => this.vertices.get(id).clone()),
+      vertices: vertexIds.map(id => this.vertexMap.get(id).clone()),
       mapVertices
     };
   }
@@ -45,7 +45,6 @@ export class TriGrid {
     const lowerY = .72360679775;
     let index = 0;
 
-    // Five north-cap triangles. N is a real physical vertex at +Y.
     for (let i = 0; i < 5; i++) {
       const j = (i + 1) % 5;
       const x0 = i / 5;
@@ -57,7 +56,6 @@ export class TriGrid {
       ]));
     }
 
-    // Ten middle-band triangles. Each five-column cell remains two explicit tris.
     for (let i = 0; i < 5; i++) {
       const j = (i + 1) % 5;
       const x0 = i / 5;
@@ -74,7 +72,6 @@ export class TriGrid {
       ]));
     }
 
-    // Five south-cap triangles. S is a real physical vertex at -Y.
     for (let i = 0; i < 5; i++) {
       const j = (i + 1) % 5;
       const x0 = i / 5;
@@ -97,17 +94,8 @@ export class TriGrid {
     return this.faces[index] || null;
   }
 
-  faceVertices(index) {
-    return this.face(index)?.vertices || null;
-  }
-
-  verticesForFace(index) {
-    return this.faceVertices(index);
-  }
-
-  // Compatibility with the existing views.
   vertices(index) {
-    return this.faceVertices(index);
+    return this.face(index)?.vertices || null;
   }
 
   mapVertices(index) {
