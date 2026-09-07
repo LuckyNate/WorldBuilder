@@ -5,6 +5,18 @@ export class MapView {
     this.selection = selection;
   }
 
+  project(v) {
+    const n = v.clone().normalize();
+    return {
+      u: Math.atan2(n.x, n.z) / (Math.PI * 2) + .5,
+      v: .5 - Math.asin(n.y) / Math.PI
+    };
+  }
+
+  projectedFace(face) {
+    return face.vertices.map(v => this.project(v));
+  }
+
   inside(x, y, a, b, c) {
     const s = (p1, p2, p3) => (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
     const q = { x, y };
@@ -17,11 +29,8 @@ export class MapView {
     const u = (x - r.left) / r.width;
     const v = (y - r.top) / r.height;
     for (const face of this.grid.faces) {
-      const q = face.mapVertices;
-      if (this.inside(u, v,
-        { x: q[0].u, y: q[0].v },
-        { x: q[1].u, y: q[1].v },
-        { x: q[2].u, y: q[2].v })) return face.index;
+      const q = this.projectedFace(face);
+      if (this.inside(u, v, q[0], q[1], q[2])) return face.index;
     }
     return -1;
   }
@@ -32,7 +41,7 @@ export class MapView {
 
   drawFace(c, face, fill = true) {
     const w = this.canvas.width, h = this.canvas.height;
-    const q = face.mapVertices;
+    const q = this.projectedFace(face);
     c.beginPath();
     c.moveTo(q[0].u * w, q[0].v * h);
     c.lineTo(q[1].u * w, q[1].v * h);
