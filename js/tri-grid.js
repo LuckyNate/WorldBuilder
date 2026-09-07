@@ -3,26 +3,89 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/+esm';
 export class TriGrid {
   constructor() {
     this.lod = 0;
+    this.vertices = this.buildCanonicalVertices();
     this.faces = this.buildLOD0();
   }
 
-  buildLOD0() {
-    const geometry = new THREE.IcosahedronGeometry(1, 0).toNonIndexed();
-    const p = geometry.attributes.position;
-    const faces = [];
-    for (let i = 0; i < p.count; i += 3) {
-      const index = i / 3;
-      faces.push({
-        index,
-        address: String(index),
-        vertices: [
-          new THREE.Vector3().fromBufferAttribute(p, i),
-          new THREE.Vector3().fromBufferAttribute(p, i + 1),
-          new THREE.Vector3().fromBufferAttribute(p, i + 2)
-        ]
-      });
+  buildCanonicalVertices() {
+    const y = 1 / Math.sqrt(5);
+    const r = 2 / Math.sqrt(5);
+    const vertices = new Map();
+
+    vertices.set('N', new THREE.Vector3(0, 1, 0));
+    vertices.set('S', new THREE.Vector3(0, -1, 0));
+
+    for (let i = 0; i < 5; i++) {
+      const upperAngle = i * Math.PI * 2 / 5;
+      const lowerAngle = (i + .5) * Math.PI * 2 / 5;
+      vertices.set(`U${i}`, new THREE.Vector3(
+        r * Math.sin(upperAngle), y, r * Math.cos(upperAngle)
+      ));
+      vertices.set(`L${i}`, new THREE.Vector3(
+        r * Math.sin(lowerAngle), -y, r * Math.cos(lowerAngle)
+      ));
     }
-    geometry.dispose();
+
+    return vertices;
+  }
+
+  makeFace(index, vertexIds, mapVertices) {
+    return {
+      index,
+      address: String(index),
+      vertexIds,
+      vertices: vertexIds.map(id => this.vertices.get(id).clone()),
+      mapVertices
+    };
+  }
+
+  buildLOD0() {
+    const faces = [];
+    const upperY = .27639320225;
+    const lowerY = .72360679775;
+    let index = 0;
+
+    // Five north-cap triangles. N is a real physical vertex at +Y.
+    for (let i = 0; i < 5; i++) {
+      const j = (i + 1) % 5;
+      const x0 = i / 5;
+      const x1 = (i + 1) / 5;
+      faces.push(this.makeFace(index++, ['N', `U${i}`, `U${j}`], [
+        { u: (x0 + x1) * .5, v: 0 },
+        { u: x0, v: upperY },
+        { u: x1, v: upperY }
+      ]));
+    }
+
+    // Ten middle-band triangles. Each five-column cell remains two explicit tris.
+    for (let i = 0; i < 5; i++) {
+      const j = (i + 1) % 5;
+      const x0 = i / 5;
+      const x1 = (i + 1) / 5;
+      faces.push(this.makeFace(index++, [`U${i}`, `L${i}`, `U${j}`], [
+        { u: x0, v: upperY },
+        { u: x0, v: lowerY },
+        { u: x1, v: upperY }
+      ]));
+      faces.push(this.makeFace(index++, [`U${j}`, `L${i}`, `L${j}`], [
+        { u: x1, v: upperY },
+        { u: x0, v: lowerY },
+        { u: x1, v: lowerY }
+      ]));
+    }
+
+    // Five south-cap triangles. S is a real physical vertex at -Y.
+    for (let i = 0; i < 5; i++) {
+      const j = (i + 1) % 5;
+      const x0 = i / 5;
+      const x1 = (i + 1) / 5;
+      faces.push(this.makeFace(index++, ['S', `L${j}`, `L${i}`], [
+        { u: (x0 + x1) * .5, v: 1 },
+        { u: x1, v: lowerY },
+        { u: x0, v: lowerY }
+      ]));
+    }
+
     return faces;
   }
 
@@ -34,8 +97,21 @@ export class TriGrid {
     return this.faces[index] || null;
   }
 
-  vertices(index) {
+  faceVertices(index) {
     return this.face(index)?.vertices || null;
+  }
+
+  verticesForFace(index) {
+    return this.faceVertices(index);
+  }
+
+  // Compatibility with the existing views.
+  vertices(index) {
+    return this.faceVertices(index);
+  }
+
+  mapVertices(index) {
+    return this.face(index)?.mapVertices || null;
   }
 
   childAddress(parentAddress, childIndex) {
