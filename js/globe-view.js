@@ -1,5 +1,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/+esm';
 
+const MAX_LAT = Math.PI / 2 - .03;
+
 export class GlobeView {
   constructor(container, triGrid, selection) {
     this.container = container;
@@ -8,13 +10,11 @@ export class GlobeView {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x10242b);
     this.camera = new THREE.PerspectiveCamera(38, 1, .1, 20);
-    this.camera.position.z = 3.2;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.container.appendChild(this.renderer.domElement);
 
     this.group = new THREE.Group();
-    this.group.rotation.order = 'YXZ';
     this.scene.add(this.group);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x26363b, 1.8));
     const dl = new THREE.DirectionalLight(0xffffff, 1.8);
@@ -22,18 +22,42 @@ export class GlobeView {
     this.scene.add(dl);
 
     this.geometry = this.grid.buildGeometry(true);
-    this.mesh = new THREE.Mesh(this.geometry, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: .82, side: THREE.FrontSide }));
-    this.wire = new THREE.LineSegments(new THREE.EdgesGeometry(this.geometry), new THREE.LineBasicMaterial({ color: 0x41575b, depthTest: true }));
+    this.mesh = new THREE.Mesh(this.geometry, new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      flatShading: true,
+      roughness: .82,
+      side: THREE.FrontSide
+    }));
+    this.wire = new THREE.LineSegments(
+      new THREE.EdgesGeometry(this.geometry),
+      new THREE.LineBasicMaterial({ color: 0x41575b, depthTest: true })
+    );
     this.group.add(this.mesh, this.wire);
 
     this.ray = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
     this.previewOutline = null;
-    this.targetRotation = null;
+    this.viewLon = 0;
+    this.viewLat = 0;
+    this.radius = 3.2;
+    this.targetView = null;
+    this.applyView();
   }
 
   get element() {
     return this.renderer.domElement;
+  }
+
+  applyView() {
+    const cl = Math.cos(this.viewLat);
+    this.camera.position.set(
+      this.radius * cl * Math.sin(this.viewLon),
+      this.radius * Math.sin(this.viewLat),
+      this.radius * cl * Math.cos(this.viewLon)
+    );
+    this.camera.up.set(0, 1, 0);
+    this.camera.lookAt(0, 0, 0);
+    this.camera.updateMatrixWorld();
   }
 
   faceAt(x, y) {
@@ -60,14 +84,19 @@ export class GlobeView {
     const ab = t[1].clone().sub(t[0]);
     const ac = t[2].clone().sub(t[0]);
     const normal = ab.cross(ac).normalize().multiplyScalar(.003);
-    const a = t[0].clone().add(normal), b = t[1].clone().add(normal), c = t[2].clone().add(normal);
+    const a = t[0].clone().add(normal);
+    const b = t[1].clone().add(normal);
+    const c = t[2].clone().add(normal);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([
       a.x,a.y,a.z,b.x,b.y,b.z,
       b.x,b.y,b.z,c.x,c.y,c.z,
       c.x,c.y,c.z,a.x,a.y,a.z
     ], 3));
-    this.previewOutline = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x9edfff, depthTest: true, depthWrite: false }));
+    this.previewOutline = new THREE.LineSegments(
+      g,
+      new THREE.LineBasicMaterial({ color: 0x9edfff, depthTest: true, depthWrite: false })
+    );
     this.previewOutline.renderOrder = 10;
     this.group.add(this.previewOutline);
   }
@@ -84,7 +113,7 @@ export class GlobeView {
 
   recenterSelection(ids) {
     if (!ids.length) {
-      this.targetRotation = null;
+      this.targetView = null;
       return;
     }
     const m = new THREE.Vector3();
@@ -94,26 +123,25 @@ export class GlobeView {
       m.add(t[0]).add(t[1]).add(t[2]);
     }
     if (m.lengthSq() < 1e-9) {
-      this.targetRotation = null;
+      this.targetView = null;
       return;
     }
     m.normalize();
-    const horizontal = Math.hypot(m.x, m.z);
-    this.targetRotation = {
-      x: THREE.MathUtils.clamp(Math.atan2(m.y, horizontal), -Math.PI/2, Math.PI/2),
-      y: -Math.atan2(m.x, m.z)
+    this.targetView = {
+      lon: Math.atan2(m.x, m.z),
+      lat: THREE.MathUtils.clamp(Math.asin(m.y), -MAX_LAT, MAX_LAT)
     };
   }
 
   stopRecenter() {
-    this.targetRotation = null;
+    this.targetView = null;
   }
 
   drag(dx, dy) {
-    this.targetRotation = null;
-    this.group.rotation.y += dx * .008;
-    this.group.rotation.x = THREE.MathUtils.clamp(this.group.rotation.x + dy * .008, -Math.PI/2, Math.PI/2);
-    this.group.rotation.z = 0;
+    this.targetView = null;
+    this.viewLon -= dx * .008;
+    this.viewLat = THREE.MathUtils.clamp(this.viewLat + dy * .008, -MAX_LAT, MAX_LAT);
+    this.applyView();
   }
 
   angleDelta(a, b) {
@@ -124,17 +152,16 @@ export class GlobeView {
   }
 
   tick() {
-    if (this.targetRotation) {
-      this.group.rotation.x += (this.targetRotation.x - this.group.rotation.x) * .14;
-      this.group.rotation.y += this.angleDelta(this.group.rotation.y, this.targetRotation.y) * .14;
-      if (Math.abs(this.targetRotation.x - this.group.rotation.x) < .001 && Math.abs(this.angleDelta(this.group.rotation.y, this.targetRotation.y)) < .001) {
-        this.group.rotation.x = this.targetRotation.x;
-        this.group.rotation.y = this.targetRotation.y;
-        this.targetRotation = null;
+    if (this.targetView) {
+      this.viewLon += this.angleDelta(this.viewLon, this.targetView.lon) * .14;
+      this.viewLat += (this.targetView.lat - this.viewLat) * .14;
+      if (Math.abs(this.angleDelta(this.viewLon, this.targetView.lon)) < .001 && Math.abs(this.targetView.lat - this.viewLat) < .001) {
+        this.viewLon = this.targetView.lon;
+        this.viewLat = this.targetView.lat;
+        this.targetView = null;
       }
+      this.applyView();
     }
-    this.group.rotation.x = THREE.MathUtils.clamp(this.group.rotation.x, -Math.PI/2, Math.PI/2);
-    this.group.rotation.z = 0;
     this.renderer.render(this.scene, this.camera);
   }
 
